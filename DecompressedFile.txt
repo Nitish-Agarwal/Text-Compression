@@ -1,0 +1,278 @@
+I see some space inefficiencies in the specifics provided to us.
+
+1.
+We are storing decimal digits from 0 - 9 in 1 byte(8 bits) consuming a lot
+of space in which we can easily store 256 different entities. For example
+for the number 16996, we are using 5 precious bytes while all different
+integers from 0 to 65535 can easily be stored in a couple of bytes each.
+
+2. To check whether there is a distinction between two digits, we are
+using
+"><" which consumes 2 bytes or 16 bits. Even storing a single character
+such as " " isn't efficient enough as then still, we are going to consume
+a
+byte i.e. 8 bits while all that is required to know whether there is a
+'space' between two digits is a 'yes' or a 'no' which should be capable of
+being stored in a single bit, yes merely a BIT.
+
+
+Here's how I got rid of the above two inefficiencies.
+The file compressor that I have programmed compresses in the following
+manner.
+
+1.
+Instead of writing the compressed string as decimal digits (0 - 9), it
+converts the number into a base 256 number and stores the corresponding
+ASCII code for each of the digits. For example- "<16996>" is stored as
+"Bd"
+as 16996 = 66(B) * 256 + 100(d). Hence we reduce the file size by a factor
+of log256 which is around 2.41
+
+2.
+Although, the elementary unit of storage is a byte and we cannot store a
+single bit, using a bool array in my program, I made a list of all the
+places and the array contained information whether there should be a
+'space' in between or not. Then, I combined 8 such elements and created a
+base 256 number out of them for which I stored the corresponding ASCII
+code
+at the end of my file. Thus I kind of 'shared' the byte among 8 possible
+places of space each effectively using a single bit. For example, if the
+bools in the array are 0111101, I just stored a 'y' in the file as the
+ASCII code for 'y' is '121' for which the digits in the array are its
+binary representation.
+
+
+I am able to achieve great compression using my modifications to the
+'regular' algorithm and I am easily able to decompress the compressed file
+achieving all the goals.
+
+
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <vector>
+using namespace std;
+
+struct dictionary{
+	int code;
+	string key;
+};
+
+int size = 1009;
+vector <string*> key;
+dictionary** hash = new dictionary*[size];
+void Hash();
+bool isprime(int);
+void computeindex(int&, const string&);
+int power(int, int);
+void compress(char*, int);
+bool indictionary(const string&, int&);
+
+int main(){
+	for(int i = 0; i < size; i++)
+		hash[i] = 0;
+	for(int i = 0; i < 256; i++){
+		string* a = new string(string(1, i));
+		key.push_back(a);
+		Hash();
+	}
+	ifstream InputFile("InputFile.txt",ios :: binary);
+	if(!InputFile){
+		cout<<"Sorry. Input file is not present.\n\n";
+		return 1;
+	}
+	InputFile.seekg(0, ios::end);
+	int sz = InputFile.tellg();
+	char* data = new char[sz];
+	InputFile.seekg(0, ios::beg);
+	InputFile.read(data, sz);
+	int count = InputFile.gcount();
+	InputFile.close();
+	compress(data, count);
+}
+
+void compress(char* data, int size){
+	ofstream OutputFile("CompressedFile.txt", ios :: binary);
+	string space1 = "";
+	string space2 = "";
+	string a = "";
+	for(int i = 0; i < size; i++){
+		string b = string(1, data[i]);
+		int code;
+		if(indictionary(a + b, code))
+			a = a + b;
+		else{
+			indictionary(a, code);
+			int j;
+			for(j = 3; j >= 0 && !(code / power(256, j)); j--);
+			space1 += string(1, j + 48);
+			for(int k = j; k >= 0; code %= power(256, k), k--)
+				OutputFile<<char(code / power(256, k));
+			string* c = new string(a + b);
+			key.push_back(c);
+			Hash();
+			a = b;
+		}
+	}
+	int code;
+	indictionary(a, code);
+	int j;
+	for(j = 3; j >= 0 && !(code / power(256, j)); j--);
+	space1 = space1 + string(1, char(j + 48));
+	for(int k = j; k >= 0; code %= power(256, k), k--)
+		OutputFile<<char(code / power(256, k));
+	OutputFile<<"#";
+	string s = string(4, 0);
+	OutputFile<<s;
+	space1 += "000";
+	const char* c = space1.c_str();
+	for(int i = 0; c[i] && c[i + 1] && c[i + 2] && c[i + 3]; i += 4)
+		space2 += string(1, 64 * (c[i] - 48) + 16 * (c[i + 1] - 48) + 4 * (c[i + 2] - 48) + c[i + 3] - 48);
+	OutputFile<<space2;
+	OutputFile.close();
+	cout<<"Your file has been successfully compressed.\n";
+}
+
+void Hash(){
+	if(key.size() > size / 2){
+		int oldsize = size;
+		for(size *= 2; !isprime(size); size++);
+		dictionary** temp = new dictionary*[size];
+		for(int i = 0; i < size; i++)
+			temp[i] = 0;
+		for(int i = 0; i < oldsize; i++)
+			if(hash[i]){
+				int hashindex = 0;
+				computeindex(hashindex, hash[i]->key);
+				for(int i = 1; temp[hashindex]; i++)
+					hashindex = (hashindex + 2 * i - 1) % size;
+				temp[hashindex] = hash[i];
+			}
+		delete []hash;
+		hash = temp;
+	}
+	int hashindex;
+	computeindex(hashindex, *key.back());
+	for(int i = 1; hash[hashindex]; i++)
+		hashindex = (hashindex + 2 * i - 1) % size;
+	hash[hashindex] = new dictionary ;
+	hash[hashindex]->key = *key.back();
+	hash[hashindex]->code = key.size() - 1;
+}
+
+void computeindex(int& x, const string& s){
+	const char* a = s.c_str();
+	x = 0;
+	for(int i = 0; i < 9 && a[i]; i++)
+		x += ((power(i + 1, 8) % size) * (power((a[i] + 256) % 256, 3) % size + power((a[i] + 128), 2) % size)) % size;
+	x %= size;
+}
+
+bool indictionary(const string& s, int& code){
+	int x;
+	computeindex(x, s);
+	for(int i = 1; hash[x]; i++){
+		if(hash[x]->key == s){
+			code = hash[x]->code;
+			return 1;
+		}
+		x = (x + 2 * i - 1) % size;
+	}
+	return 0;
+}
+
+bool isprime(int a){
+ 	int b;
+	for(b = 2; b <= a/b; b++)
+		if(!(a % b))
+			b = a;
+	if(b == a + 1)
+		return 0;
+	else
+		return 1;
+}
+
+int power(int a, int b){
+	if(!b)
+		return 1;
+	return a * power(a, b - 1);
+}
+
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <vector>
+using namespace std;
+
+vector <string> key;
+void Decompress(char*, int);
+int power(int, int);
+
+int main(){
+	for(int i = 0; i < 256; i++)
+		key.push_back(string(1, i));
+	ifstream InputFile("CompressedFile.txt", ios :: binary);
+	if(!InputFile){
+		cout<<"Sorry. Input file is not present.\n\n";
+		return 1;
+	}
+	InputFile.seekg(0, ios::end);
+	int sz = InputFile.tellg();
+	char* data = new char[sz];
+	InputFile.seekg(0, ios::beg);
+	InputFile.read(data, sz);
+	int count = InputFile.gcount();
+	InputFile.close();
+	Decompress(data, count);
+	return 0;
+}
+
+void Decompress(char* data, int size){
+	int i;
+	for(i = 0; data[i + 1] || data[i + 2] || data[i + 3] || data[i + 4]; i++);
+	vector <char> space;
+	for(int C = i + 5; C < size; C++){
+		space.push_back(((data[C] + 256) % 256) / 64 + 48);
+		space.push_back((((data[C] + 256) % 256) / 16) % 4 + 48);
+		space.push_back((((data[C] + 256) % 256) / 4) % 4 + 48);
+		space.push_back(((data[C] + 256) % 256) % 4 + 48);
+	}
+	vector <int> code;
+	for(int A= 0, B = 0; A < space.size(); A++){
+		int temp = 0;
+		for(int C = space[A] - 48; C >= 0 && B < i; C--)
+			temp += ((data[B++] + 256) % 256) * power(256, C);
+		code.push_back(temp);
+	}
+	ofstream OutputFile("DecompressedFile.txt", ios::binary);
+	if(!i)
+		return;
+	OutputFile<<key[code[0]];
+	for(int i = 1; i < code.size(); i++){
+		string s;
+		if(code[i] == key.size()){
+			s = key[code[i - 1]];
+			const char* c = s.c_str();
+			s += string(1, c[0]);
+		}
+		else if(code[i] > key.size()){
+			cout<<"Sorry, the compressed file cannot be decompressed.\n";
+			return;
+		}
+		else
+			s = key[code[i]];
+		const char* c = s.c_str();
+		key.push_back(key[code[i - 1]] + string(1, c[0]));
+		OutputFile<<s;
+	}
+	OutputFile.close();
+	cout<<"The compressed file has been successfully decompressed.\n";
+}
+
+int power(int a, int b){
+	if(!b)
+		return 1;
+	return a * power(a, b - 1);
+}
+
+
